@@ -162,11 +162,14 @@
   <header class="ui-card border-b px-4 py-3 flex items-center justify-between sticky top-0 z-10 transition-colors">
     <div class="flex items-center gap-2">
       <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow">O</div>
-      <h1 class="text-lg font-bold tracking-wide">OmniShelf <span class="text-[10px] opacity-50 font-normal align-middle">v2.38</span></h1>
+      <h1 class="text-lg font-bold tracking-wide">OmniShelf <span class="text-[10px] opacity-50 font-normal align-middle">v2.39</span></h1>
     </div>
     <div class="flex items-center gap-2">
       <button onclick="switchTab('settings')" id="gdrive-sync-error-badge" title="Sincronizzazione Google Drive fallita: apri Opzioni per i dettagli" class="hidden text-xs px-2 py-1 rounded-full bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition items-center">
         🚫
+      </button>
+      <button onclick="gdriveUploadOnly()" id="gdrive-upload-btn" title="Carica i dati su Google Drive (solo upload, senza scaricare prima)" class="text-xs px-2 py-1 rounded-full border transition flex items-center bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20">
+        ⬆️
       </button>
       <button onclick="openGlobalSearchModal()" title="Cerca in tutto OmniShelf" class="text-xs px-2.5 py-1 rounded-full bg-gray-500/10 border border-gray-500/20 hover:bg-gray-500/20 transition flex items-center gap-1">
         🔍
@@ -2451,6 +2454,68 @@
       updateGdriveSyncStatusIcon();
       showToast("Google Drive scollegato (il file resta comunque sul tuo Drive)");
       render();
+    }
+
+    // Applica lo stato visivo (verde/giallo animato/rosso) al tasto ⬆️ di upload rapido
+    // nell'header. Stato solo visivo/in memoria, non persistito: ad ogni ricarica dell'app
+    // riparte verde, il colore riflette solo l'ultimo tentativo fatto in questa sessione.
+    function setGdriveUploadBtnState(state) {
+      const btn = document.getElementById('gdrive-upload-btn');
+      if (!btn) return;
+      btn.classList.remove(
+        'bg-emerald-500/10', 'border-emerald-500/30', 'text-emerald-500', 'hover:bg-emerald-500/20',
+        'bg-yellow-500/10', 'border-yellow-500/30', 'text-yellow-500', 'animate-bounce', 'cursor-not-allowed', 'opacity-90',
+        'bg-red-500/10', 'border-red-500/30', 'text-red-500', 'hover:bg-red-500/20'
+      );
+      if (state === 'uploading') {
+        btn.disabled = true;
+        btn.classList.add('bg-yellow-500/10', 'border-yellow-500/30', 'text-yellow-500', 'animate-bounce', 'cursor-not-allowed', 'opacity-90');
+        btn.title = 'Caricamento su Google Drive in corso...';
+      } else if (state === 'error') {
+        btn.disabled = false;
+        btn.classList.add('bg-red-500/10', 'border-red-500/30', 'text-red-500', 'hover:bg-red-500/20');
+        btn.title = "L'ultimo caricamento su Google Drive è fallito — tocca per riprovare";
+      } else {
+        btn.disabled = false;
+        btn.classList.add('bg-emerald-500/10', 'border-emerald-500/30', 'text-emerald-500', 'hover:bg-emerald-500/20');
+        btn.title = 'Carica i dati su Google Drive (solo upload, senza scaricare prima)';
+      }
+    }
+
+    // Upload rapido: SOLO caricamento locale -> Drive, nessun download/merge preventivo dal
+    // remoto (a differenza di gdriveSyncNow). Utile per pubblicare subito una modifica fatta ora
+    // su questo dispositivo, sapendo che sovrascriverà il contenuto del file su Drive.
+    async function gdriveUploadOnly() {
+      const btn = document.getElementById('gdrive-upload-btn');
+      if (!btn || btn.disabled) return;
+      SoundFX.playTap();
+
+      if (!appSettings.gdriveClientId) {
+        showToast("Configura prima il Client ID Google nelle Opzioni");
+        return;
+      }
+
+      setGdriveUploadBtnState('uploading');
+      try {
+        // Click diretto dell'utente: può mostrare il login Google se serve un nuovo token.
+        const token = await gdriveGetAccessToken(true);
+        let fileId = appSettings.gdriveFileId || await gdriveFindFileId(token);
+        const jsonStr = JSON.stringify(await buildLocalBackupObject());
+        const result = await gdriveUploadFile(token, fileId, jsonStr);
+        fileId = result.id || fileId;
+
+        appSettings.gdriveFileId = fileId;
+        appSettings.gdriveConnected = true;
+        appSettings.gdriveLastSync = new Date().toISOString();
+        await dbSave('settings', appSettings);
+
+        setGdriveUploadBtnState('success');
+        showToast("Dati caricati su Google Drive!");
+      } catch (e) {
+        console.error("Errore upload Google Drive:", e);
+        setGdriveUploadBtnState('error');
+        showToast("Upload Drive fallito: " + (e.message || 'riprova'));
+      }
     }
 
     // Sync completa: scarica il file remoto e lo unisce ai dati locali (come l'import JSON),
