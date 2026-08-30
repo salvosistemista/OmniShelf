@@ -162,9 +162,12 @@
   <header class="ui-card border-b px-4 py-3 flex items-center justify-between sticky top-0 z-10 transition-colors">
     <div class="flex items-center gap-2">
       <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow">O</div>
-      <h1 class="text-lg font-bold tracking-wide">OmniShelf <span class="text-[10px] opacity-50 font-normal align-middle">v2.36</span></h1>
+      <h1 class="text-lg font-bold tracking-wide">OmniShelf <span class="text-[10px] opacity-50 font-normal align-middle">v2.38</span></h1>
     </div>
     <div class="flex items-center gap-2">
+      <button onclick="switchTab('settings')" id="gdrive-sync-error-badge" title="Sincronizzazione Google Drive fallita: apri Opzioni per i dettagli" class="hidden text-xs px-2 py-1 rounded-full bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition items-center">
+        🚫
+      </button>
       <button onclick="openGlobalSearchModal()" title="Cerca in tutto OmniShelf" class="text-xs px-2.5 py-1 rounded-full bg-gray-500/10 border border-gray-500/20 hover:bg-gray-500/20 transition flex items-center gap-1">
         🔍
       </button>
@@ -549,7 +552,8 @@
       gdriveFileId: '',
       gdriveConnected: false,
       gdriveAutoSync: true,
-      gdriveLastSync: ''
+      gdriveLastSync: '',
+      gdriveLastError: ''
     };
 
     let availableGenres = [];
@@ -751,6 +755,22 @@
         notifStatus.innerText = Notification && Notification.permission === 'granted' ? 'Notifiche ON' : 'Notifiche';
       }
       renderNavBar();
+      updateGdriveSyncStatusIcon();
+    }
+
+    // Mostra/nasconde il simbolo 🚫 in alto a destra (accanto alla lente di ricerca) quando
+    // l'ultima sincronizzazione con Google Drive è fallita. Va richiamata esplicitamente ogni
+    // volta che appSettings.gdriveLastError cambia, perché l'header non fa parte dell'area
+    // ricostruita da render() ad ogni cambio schermata.
+    function updateGdriveSyncStatusIcon() {
+      const badge = document.getElementById('gdrive-sync-error-badge');
+      if (!badge) return;
+      const hasError = !!(appSettings.gdriveConnected && appSettings.gdriveLastError);
+      badge.classList.toggle('hidden', !hasError);
+      badge.classList.toggle('flex', hasError);
+      if (hasError) {
+        badge.title = 'Sincronizzazione Google Drive fallita: ' + appSettings.gdriveLastError + ' — tocca per aprire Opzioni';
+      }
     }
 
     // Ricostruisce la bottom nav nell'ordine scelto in Opzioni (appSettings.navOrder).
@@ -2411,7 +2431,9 @@
         appSettings.gdriveFileId = fileId;
         appSettings.gdriveConnected = true;
         appSettings.gdriveLastSync = new Date().toISOString();
+        appSettings.gdriveLastError = '';
         await dbSave('settings', appSettings);
+        updateGdriveSyncStatusIcon();
         showToast("Google Drive collegato!");
         render();
       } catch (e) {
@@ -2426,6 +2448,7 @@
       gdriveAccessTokenExpiry = 0;
       appSettings.gdriveConnected = false;
       await dbSave('settings', appSettings);
+      updateGdriveSyncStatusIcon();
       showToast("Google Drive scollegato (il file resta comunque sul tuo Drive)");
       render();
     }
@@ -2456,15 +2479,24 @@
 
         appSettings.gdriveFileId = fileId;
         appSettings.gdriveLastSync = new Date().toISOString();
+        appSettings.gdriveLastError = '';
         await dbSave('settings', appSettings);
+        updateGdriveSyncStatusIcon();
 
         if (interactive) showToast("Sincronizzazione completata!");
         render();
       } catch (e) {
         console.error("Errore sincronizzazione Google Drive:", e);
         if (interactive) showToast("Sync Drive fallita: " + (e.message || 'riprova'));
-        // In modalità silenziosa (avvio app) non mostriamo errori: probabilmente serve solo
-        // rifare il login (token scaduto), cosa che l'utente potrà fare col pulsante manuale.
+        // In modalità silenziosa (avvio app) non mostriamo un popup (per non interrompere
+        // l'utente ogni volta che il token scade), ma salviamo comunque l'errore così resta
+        // visibile in Opzioni finché non si risolve o non si ritenta con successo, e accendiamo
+        // il simbolo 🚫 accanto alla lente di ricerca per renderlo visibile subito anche fuori
+        // dalle Opzioni.
+        appSettings.gdriveLastError = (e.message || 'Errore sconosciuto') + ' — ' + new Date().toLocaleString('it-IT');
+        await dbSave('settings', appSettings);
+        updateGdriveSyncStatusIcon();
+        render();
       } finally {
         gdriveSyncInProgress = false;
       }
@@ -4170,6 +4202,9 @@
 
               ${appSettings.gdriveConnected ? `
                 <p class="text-[11px] opacity-70">✅ Collegato${appSettings.gdriveLastSync ? ` — ultima sync: ${new Date(appSettings.gdriveLastSync).toLocaleString('it-IT')}` : ''}</p>
+                ${appSettings.gdriveLastError ? `
+                  <p class="text-[11px] bg-red-500/10 border border-red-500/30 text-red-400 rounded-lg p-2">⚠️ Ultima sync automatica fallita (${appSettings.gdriveLastError}). Prova "Sincronizza ora": se il problema persiste, potrebbe servire ricollegare l'account.</p>
+                ` : ''}
                 <label class="flex items-center gap-2 text-xs cursor-pointer">
                   <input type="checkbox" ${appSettings.gdriveAutoSync ? 'checked' : ''} onchange="updateSetting('gdriveAutoSync', this.checked)" class="rounded accent-indigo-600">
                   <span>Sincronizza automaticamente all'apertura dell'app</span>
