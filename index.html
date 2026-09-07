@@ -162,7 +162,7 @@
   <header class="ui-card border-b px-4 py-3 flex items-center justify-between sticky top-0 z-10 transition-colors">
     <div class="flex items-center gap-2">
       <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow">O</div>
-      <h1 class="text-lg font-bold tracking-wide">OmniShelf <span class="text-[10px] opacity-50 font-normal align-middle">v2.39</span></h1>
+      <h1 class="text-lg font-bold tracking-wide">OmniShelf <span class="text-[10px] opacity-50 font-normal align-middle">v2.40</span></h1>
     </div>
     <div class="flex items-center gap-2">
       <button onclick="switchTab('settings')" id="gdrive-sync-error-badge" title="Sincronizzazione Google Drive fallita: apri Opzioni per i dettagli" class="hidden text-xs px-2 py-1 rounded-full bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition items-center">
@@ -2328,10 +2328,16 @@
       });
     }
 
-    // Ottiene un access token valido. interactive=true mostra il popup di consenso Google se serve
-    // (va chiamato solo in risposta diretta a un click utente, per non farlo bloccare dal browser).
-    // interactive=false tenta un rinnovo silenzioso (funziona solo se l'utente ha già autorizzato
-    // l'app in precedenza in questo browser); se fallisce, si rifiuta senza mostrare popup.
+    // Ottiene un access token valido.
+    // interactive=true: usato per azioni partite da un click esplicito dell'utente (pulsanti
+    // "Collega", "Sincronizza ora", ⬆️). prompt:'' lascia decidere a Google Identity Services:
+    // NON forza la schermata di consenso se l'hai già autorizzata in precedenza e la sessione
+    // Google nel browser è valida — la mostra solo se serve davvero (prima volta, accesso
+    // revocato, ecc.). Va chiamato solo in risposta diretta a un click, per non farlo bloccare
+    // dal browser come popup indesiderato.
+    // interactive=false: rinnovo silenzioso per la sync automatica in background. prompt:'none'
+    // garantisce che non venga MAI mostrata alcuna interfaccia: se serve un login, fallisce e
+    // basta (l'errore verrà segnalato dal simbolo 🚫), senza mai interrompere l'utente.
     async function gdriveGetAccessToken(interactive) {
       if (!appSettings.gdriveClientId) throw new Error('Client ID Google mancante nelle Opzioni');
       await gdriveWaitForScript();
@@ -2353,7 +2359,7 @@
             },
             error_callback: (err) => reject(new Error(err && err.type ? err.type : 'Autenticazione Google annullata o fallita'))
           });
-          gdriveTokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
+          gdriveTokenClient.requestAccessToken({ prompt: interactive ? '' : 'none' });
         } catch (e) {
           reject(e);
         }
